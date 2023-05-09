@@ -1,90 +1,89 @@
 package ais
 
 import (
-	"encoding/csv"
+	"bufio"
 	"fmt"
 	"io"
-	"os"
+	"strings"
 )
 
-func ReadData(filename string) ([]VesselData, error) {
-	file, err := os.Open(filename)
+func ReadData(reader *bufio.Reader) ([]VesselData, error) {
+	_, err := reader.ReadString('\n') // Skip the header
 	if err != nil {
-		return nil, fmt.Errorf("failed to open data: %v", err)
-	}
-	defer file.Close()
-
-	reader := csv.NewReader(file)
-	_, err = reader.Read() // skip the header
-	if err != nil {
-		return nil, fmt.Errorf("failed to read: %v", err)
+		return nil, fmt.Errorf("failed to read header: %v", err)
 	}
 
 	var data []VesselData
 	lineNumber := 2 // Start at 2 because we skipped the header
 	for {
-		record, err := reader.Read()
+		line, err := reader.ReadString('\n')
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
 			return nil, fmt.Errorf("failed to read line %d: %v", lineNumber, err)
-		}	
-
-		lat, err := parseFloat(record[2], 0)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing latitude: %v", err)
+		}
+		fields := strings.Split(strings.TrimSpace(line), ",")
+		if len(fields) != 17 {
+			return nil, fmt.Errorf("invalid number of fields in line %d: %d", lineNumber, len(fields))
 		}
 
-		lon, err := parseFloat(record[3], 0)
+		lat, err := parseFloat(fields[2], 0)
 		if err != nil {
-			return nil, fmt.Errorf("error parsing longitude: %v", err)
+			return nil, fmt.Errorf("error parsing latitude on line %d: %v", lineNumber, err)
 		}
 
-		sog, err := parseFloat(record[4], 0)
+		lon, err := parseFloat(fields[3], 0)
 		if err != nil {
-			return nil, fmt.Errorf("error parsing speed over ground: %v", err)
+			return nil, fmt.Errorf("error parsing longitude on line %d: %v", lineNumber, err)
 		}
 
-		cog, err := parseFloat(record[5], 0)
+		sog, err := parseFloat(fields[4], 0)
 		if err != nil {
-			return nil, fmt.Errorf("error parsing course over ground: %v", err)
+			return nil, fmt.Errorf("error parsing speed over ground on line %d: %v", lineNumber, err)
 		}
 
-		length, err := parseFloat(record[12], 0)
+		cog, err := parseFloat(fields[5], 0)
 		if err != nil {
-			return nil, fmt.Errorf("error parsing length: %v", err)
+			return nil, fmt.Errorf("error parsing course over ground on line %d: %v", lineNumber, err)
 		}
 
-		width, err := parseFloat(record[13], 0)
+		length, err := parseFloat(fields[12], 0)
 		if err != nil {
-			return nil, fmt.Errorf("error parsing width: %v", err)
+			return nil, fmt.Errorf("error parsing length on line %d: %v", lineNumber, err)
 		}
 
-		draft, err := parseFloat(record[14], 0)
+		width, err := parseFloat(fields[13], 0)
 		if err != nil {
-			return nil, fmt.Errorf("error parsing draft: %v", err)
+			return nil, fmt.Errorf("error parsing width on line %d: %v", lineNumber, err)
+		}
+
+		draft, err := parseFloat(fields[14], 0)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing draft on line %d: %v", lineNumber, err)
 		}
 
 		data = append(data, VesselData{
-			MMSI:             record[0],
-			BaseDateTime:     record[1],
+			MMSI:             fields[0],
+			BaseDateTime:     fields[1],
 			LAT:              lat,
 			LON:              lon,
 			SOG:              sog,
 			COG:              cog,
-			Heading:          record[6],
-			VesselName:       record[7],
-			IMO:              record[8],
-			CallSign:         record[9],
-			VesselType:       record[10],
-			Status:           record[11],
+			Heading:          fields[6],
+			VesselName:       fields[7],
+			IMO:              fields[8],
+			CallSign:         fields[9],
+			VesselType:       fields[10],
+			Status:           fields[11],
 			Length:           length,
 			Width:            width,
 			Draft:            draft,
-			Cargo:            record[15],
-			TransceiverClass: record[16],
+			Cargo:            fields[15],
+			TransceiverClass: fields[16],
 		})
+
+		lineNumber++
 	}
 
 	return data, nil
