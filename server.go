@@ -14,7 +14,6 @@ type Server struct {
 	Upgrader websocket.Upgrader
 	Clients  map[*websocket.Conn]bool
 	Mu       sync.Mutex // Protects the Clients map
-	Ticker   *time.Ticker
 	Data     []VesselData
 }
 
@@ -31,7 +30,6 @@ func NewServer(filename string) *Server {
 			},
 		},
 		Clients:   make(map[*websocket.Conn]bool),
-		Ticker:    time.NewTicker(time.Second * 2),
 		Data:      data,
 	}
 }
@@ -79,23 +77,21 @@ func (s *Server) handleClient(ws *websocket.Conn) {
 }
 
 func (s *Server) sendUpdatesToClients() {
-	for range s.Ticker.C {
-		for i := 0; i < len(s.Data); i++ {
-			dataPoint := s.Data[i]
-			dataPointJSON, _ := json.Marshal(dataPoint)
+	for i := 0; i < len(s.Data); i++ {
+		dataPoint := s.Data[i]
+		dataPointJSON, _ := json.Marshal(dataPoint)
 
-			s.Mu.Lock()
-			for client := range s.Clients {
-				err := client.WriteMessage(websocket.TextMessage, dataPointJSON)
-				if err != nil {
-					log.Printf("error: %v | input: client.WriteMessage(1, %+v)", err, dataPointJSON)
-					client.Close()
-					delete(s.Clients, client)
-					continue
-				}
+		s.Mu.Lock()
+		for client := range s.Clients {
+			err := client.WriteMessage(websocket.TextMessage, dataPointJSON)
+			if err != nil {
+				log.Printf("error: %v | input: client.WriteMessage(1, %+v)", err, dataPointJSON)
+				client.Close()
+				delete(s.Clients, client)
+				continue
 			}
-			s.Mu.Unlock()
-			time.Sleep(time.Second * 2)
 		}
+		s.Mu.Unlock()
+		time.Sleep(time.Millisecond * 1)
 	}
 }
