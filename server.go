@@ -4,17 +4,18 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
 type Server struct {
-	Upgrader  websocket.Upgrader
-	Clients   map[*websocket.Conn]bool
-	Broadcast chan []byte
-	Ticker    *time.Ticker
-	Data      []VesselData
+	Upgrader websocket.Upgrader
+	Clients  map[*websocket.Conn]bool
+	Mu       sync.Mutex // Protects the Clients map
+	Ticker   *time.Ticker
+	Data     []VesselData
 }
 
 func NewServer(filename string) *Server {
@@ -29,52 +30,16 @@ func NewServer(filename string) *Server {
 				return true
 			},
 		},
-		Clients: make(map[*websocket.Conn]bool),
-		Broadcast: make(chan []byte),
-		Ticker: time.NewTicker(time.Second * 2),
-		Data: data,
+		Clients:   make(map[*websocket.Conn]bool),
+		Ticker:    time.NewTicker(time.Second * 2),
+		Data:      data,
 	}
 }
 
 func (s *Server) Start(address string) {
 	http.HandleFunc("/ws", s.handleConnections)
 
-	// Start a goroutine that sends data on the Broadcast channel every tick
-	go func() {
-		index := 0
-		for range s.Ticker.C {
-			// Send the current data point
-			data, err := json.Marshal(s.Data[index])
-			if err != nil {
-				log.Fatalf("error: %v | input: json.Marshal(%v)", err, s.Data[index])
-			}
-			s.Broadcast <- data
-
-			// Increment the index, and loop back to the start if necessary
-			index++
-			if index >= len(s.Data) {
-				index = 0
-			}
-		}
-	}()	
-
-	// Start a goroutine that sends broadcast messages to all clients
-	go func() {
-		for {
-			// Grab the next broadcast message
-			msg := <-s.Broadcast
-
-			// Send it out to every client
-			for client := range s.Clients {
-				err := client.WriteMessage(websocket.TextMessage, msg)
-				if err != nil {
-					log.Printf("error: %v | input: client.WriteMessage(%v, %v)", err, websocket.TextMessage, msg)
-					client.Close()
-					delete(s.Clients, client)
-				}
-			}
-		}
-	}()
+	go s.sendUpdatesToClients()
 
 	log.Println("Server starting on", address)
 	err := http.ListenAndServe(address, nil)
@@ -88,7 +53,49 @@ func (s *Server) handleConnections(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Fatalf("error: %v | input: Upgrader.Upgrade(%v, %v, %v)", err, w, r, nil)
 	}
+
+	// Add the client to the Clients map.
+	s.Mu.Lock()
+	s.Clients[ws] = true
+	s.Mu.Unlock()
+
+	go s.handleClient(ws)
+}
+
+func (s *Server) handleClient(ws *websocket.Conn) {
 	defer ws.Close()
 
-	s.Clients[ws] = true
+	for {
+		// Check for a close message from the client.
+		_, _, err := ws.ReadMessage()
+		if err != nil {
+			// If there's an error (like a closed connection), remove the client.
+			s.Mu.Lock()
+			delete(s.Clients, ws)
+			s.Mu.Unlock()
+			break
+		}
+	}
+}
+
+func (s *Server) sendUpdatesToClients() {
+	for range s.Ticker.C {
+		for i := 0; i < len(s.Data); i++ {
+			dataPoint := s.Data[i]
+			dataPointJSON, _ := json.Marshal(dataPoint)
+
+			s.Mu.Lock()
+			for client := range s.Clients {
+				err := client.WriteMessage(websocket.TextMessage, dataPointJSON)
+				if err != nil {
+					log.Printf("error: %v | input: client.WriteMessage(1, %+v)", err, dataPointJSON)
+					client.Close()
+					delete(s.Clients, client)
+					continue
+				}
+			}
+			s.Mu.Unlock()
+			time.Sleep(time.Second * 2)
+		}
+	}
 }
