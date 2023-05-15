@@ -29,8 +29,8 @@ func NewServer(filename string) *Server {
 				return true
 			},
 		},
-		Clients:   make(map[*websocket.Conn]bool),
-		Data:      data,
+		Clients: make(map[*websocket.Conn]bool),
+		Data:    data,
 	}
 }
 
@@ -92,6 +92,6 @@ func (s *Server) sendUpdatesToClients() {
 			}
 		}
 		s.Mu.Unlock()
-		time.Sleep(time.Millisecond * 1)
+		time.Sleep(time.Second * 1)
 	}
 }
